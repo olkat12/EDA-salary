@@ -1,0 +1,19 @@
+body {
+  color: #333; /* Kolor tekstu w tle body */
+}
+
+h1 {
+    color: #660033; /* Kolor tekstu dla nagłówka pierwszego poziomu */
+}
+
+h2 {
+    color: #990033; /* Kolor tekstu dla nagłówka drugiego poziomu */
+}
+
+h3 {
+    color: #B22222; /* Kolor tekstu dla nagłówka drugiego poziomu */
+}
+
+p {
+  color: #000000; /* Kolor tekstu dla paragrafów */
+}

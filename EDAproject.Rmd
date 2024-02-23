@@ -1,0 +1,850 @@
+---
+title: "EDA wynagrodzenia"
+author: "Aleksandra Talaga"
+date: "2023-11-21"
+output:
+  html_document:
+    css: theme.css
+    toc: yes
+    toc_float:
+      smoot_scrool: yes
+    df_print: paged
+  theme: theme.css
+
+---
+
+***
+# Wstęp
+W moim projekcie przyjrzę się zestawowi danych `Salary by Job Title and Country` ze strony `kaggle.com`. Jest to zestaw prezentujący zarobki w różnych zawodach w wielu miejscach na świecie, w zależności od czynników takich jak płeć, wiek, rasa czy lata doświadczenia. Dane pochodzą ze stron internetowych oraz ankiet, zawierają ponad 6500 obserwacji.
+
+## Zmienne   
+
+Zestaw danych zawiera 9 zmiennych:   
+**Age** - wiek (liczbowo)  
+**Gender** - płeć (tekstowo: Female, Male)  
+**Educational Level** - poziom wykształcenia (numerycznie: 0, 1, 2 lub 3, gdzie: 0 - szkoła średnia, 1 - tytuł licencjata, 2 - tytuł magistra, 3 - tytuł doktora)      
+**Job Title** - wykonywany zawód (tekstowo)        
+**Years of Experience** - lata doświadczenia (liczbowo)   
+**Salary** - wynagrodzenie wyrażone w dolarach amerykańskich (liczbowo)  
+**Country** - kraj (tekstowo)  
+**Race** - rasa (tekstowo)   
+**Senior** - zmienna mówi o tym, czy ktoś posiada stanowisko seniora (numerycznie: 0 - brak takiego stanowiska, 1 - stanowisko seniora)
+
+<br> <br>
+
+## Pakiety
+
+Pakiety, z których będę korzystać w projekcie:
+```{r, message = FALSE, warning = FALSE}
+library(dplyr)
+library(gapminder)
+library(ggplot2)
+library(mice)
+library(e1071)
+library(corrplot)
+
+```
+
+
+<br>
+
+***
+
+# Analiza danych
+<br>
+Wczytuję wybrany przez siebie zestaw danych, nazywam go krótko - po prostu Data
+```{r}
+Data <- read.csv("C:/RFiles/Salary.csv")
+```
+
+<br>
+
+## Wstępne obejrzenie zestawu   
+Na początku chcę wstępnie obejrzeć zestaw danych, żeby zobaczyć, na czym będę dalej pracować, lepiej zapoznać się z danymi i ewentualnie pozmieniać zestaw tak, żeby pracowało mi się na nim wygodnie. <br> <br>
+
+Rozpocznę od obejrzeniu kilku pierwszych wierszy.
+```{r}
+head(Data, 5)
+```
+
+Chcę też dokładniej poznać strukturę danych.
+```{r}
+str(Data)
+```
+
+Jak widać mamy 9 zmiennych, które posiadają po 6684 obserwacji. Typy poszczególnych zmiennych to character, numeric lub integer. Na początku zajmę się tym, by niektóre zmienne zamienić na typ factor, co będzie bardziej logiczne oraz pozwoli mi łatwiej na nich pracować.   
+Na pewno zmienna `Education.Level` jest zmienną rangowaną. Podobnie jest ze zmienną `Senior`. Obie te zmienne zamieniam od razu na typ factor.
+```{r}
+Data$Education.Level <- factor(Data$Education.Level)
+Data$Senior <- factor(Data$Senior)
+```
+
+Na typ factor zamienię również zmienne płeć, kraj oraz rasa, pamiętając, że nie są to zmiennne porządkowe lecz kategoryczne, dlatego kolejność kategorii nie ma znaczenia. Zmienną wyrażającą wykonywany zawód zostawię na razie po prostu jako tekstową.
+```{r}
+Data$Gender <- factor(Data$Gender)
+Data$Country <- factor(Data$Country)
+Data$Race <- factor(Data$Race)
+
+```
+
+Zamienię też nazwy pewnych zmiennych tak, by były krótsze i by łatwiej było później na nich operować. Zmienną `Years.of.Experience` nazwę po prostu `Experience`, zmienną `Education.Level` nazwę `Education`, a zmienną `Job.Title` nazwę `Job`.
+```{r, results = FALSE}
+Data <- Data %>%
+  rename(Experience = Years.of.Experience,
+         Education = Education.Level,
+         Job = Job.Title)
+```
+
+Sprawdzę, czy to się udało wyświetlając kilka wierszy ponownie
+```{r}
+head(Data, 3)
+```
+
+<br>
+Sprawdzę jeszcze, czy nie ma braków w danych.
+```{r, message  = FALSE}
+md.pattern(Data)
+```
+
+Jak widać, nie ma braków danych, dlatego mogę spokojnie przejść do dalszych etapów analizy.  
+Kiedy zmienne już mają odpowiednie nazwy i typ, będę chciała przyjrzeć się każdej zmiennej z osobna, aby lepiej je poznać. Zanim jednak do tego przejdę, chcę zobaczyć podstawowe statystyki wszystkich zmiennych.   
+```{r}
+summary(Data)
+```
+ <br>
+ 
+### Zmienne jakościowe (kategoryczne)
+
+Zobaczę najpierw zmienne kategoryczne. <br>     
+Kraj:
+```{r}
+table(Data$Country)
+```
+
+Posiadamy bardzo zbliżoną liczbę obserwacji z każdego kraju. Jeszcze lepiej widać to na wykresie kolumnowym - kolumny układają się w niemalże linię prostą.
+```{r}
+Data %>%
+  ggplot() +
+  geom_bar(aes(x = Country),
+           fill = "#DBA19F",
+           color = "#A13B2A") +
+  labs(title = "Liczba osób z kraju",
+       x = "kraj",
+       y = "liczba osób") +
+  theme_bw(base_size = 15)  +
+  theme(plot.title = element_text(hjust = 0.5))          
+               
+```
+
+Rasa:
+```{r}
+table(Data$Race)
+```
+
+Ze zmienną rasa jest pewien problem. Mamy wiele kategorii tej zmiennej - aż 10 ras. Nie planuję prowadzić analizy szczegółowo pod kątem rasy, dlatego na tym etapie połączę kilka ras w jedną kategorię.    
+Połączę rasy w cztery kategorie - Asian (Asian, Korean, Chinese), Black (Black, African American), White (White, Hispanic, Welsh, Australian) oraz pozostawię czwartą rasę Mixed.
+```{r}
+Asian = c("Asian", "Korean", "Chinese")
+Black = c("Black", "African American")
+White = c("White", "Hispanic", "Welsh", "Australian")
+
+Data <- Data %>%
+  mutate(Race = case_when(
+    Race %in% Asian ~ "Asian",
+    Race %in% Black ~ "Black",
+    Race %in% White ~ "White",
+    TRUE ~ Race
+  ))
+
+```
+
+<br>
+Zobaczę, jak teraz wygląda rozkład ras
+```{r}
+table(Data$Race)
+```
+
+Osób o rasie białej i azjatyckiej jest najwięcej. Dużo mniej jest osób rasy czarnej i mieszanej, ale około 300 i 700 obserwacji to wciąż dużo.   
+Mogę zobaczyć ten sam rozkład bardziej obrazowo na wykresie kolumnowym.
+```{r}
+Data %>%
+  ggplot() +
+  geom_bar(aes(x = Race),
+           fill = "#DBA19F",
+           color = "#A13B2A") +
+  labs(title = "Liczba osób o podanej rasie",
+       x = "rasa",
+       y = "liczba osób") +
+  theme_bw(base_size = 15) + 
+  theme(plot.title = element_text(hjust = 0.5)) 
+```
+<br>
+Płeć:
+```{r}
+table(Data$Gender)
+```
+Tutaj sprawa jest prosta, widać po prostu ilość osób danej płci. Mamy zbliżoną liczbę kobiet i mężczyzn.   <br>
+
+Zawód:   
+Wiem, że zawodów w tym zestawie jest bardzo wiele. Spróbuję je obejrzeć, grupując według zawodu i zliczając ilość. Ułożę też dane w sposób malejący
+
+```{r}
+By_Job <- Data %>%
+  count(Job, name = "Ilosc") %>%
+  arrange(desc(Ilosc))
+
+head(By_Job, 10)
+str(By_Job)
+```
+
+Mamy aż 129 różnych zawodów. Aby zmniejszyć liczbę kategorii zawodu, połączę część zawodów w klasę Other. Żeby wiedzieć, które zawody wziąć pod uwagę, policzę kwantyle.
+
+```{r}
+quantile(By_Job$Ilosc, probs = c(0.25, 0.5, 0.75))
+
+```
+Jak widać 25% z podanych zawodów jest wykonywanych przez 1 osobę. 50% zawodów jest wykonywanch przez nie więcej niż dwie osoby. Natomiast 75% zawodów wykonywanych jest przez nie więcej niż 53 osoby. Decyduję się, by połączyć wszystkie zawody "powyżej" trzeciego kwartyla w kategorię Inne. Będzie to dość duże uproszczenie i wrzucenie wielu różnych zawodów do jednej zbiorczej kategorii, ale w tej analizie nie planuję szczegółowo zajmować się poszczególnymi zawodami, będę porównywać ze sobą te, w których jest najwięcej danych.
+
+```{r}
+Data <- Data %>%
+  group_by(Job) %>%
+  mutate("Ilosc" = n()) %>%
+  ungroup() %>%
+  mutate(Job = ifelse(Ilosc <= 53, "Other", Job))
+  
+```
+Teraz zmienię też wreszcie zmienną `Job` na typ factor.
+
+```{r}
+Data$Job <- factor(Data$Job)
+```
+
+
+Sprawdzę, ile mamy teraz kategorii zawodów.
+```{r}
+nlevels(Data$Job)
+```
+   
+Teraz jeszcze raz sprawdzę, jak prezentuje się rozkład zawodów, tym razem używając wykresu słupkowego. Jak widzimy, kategoria Other zajmuje teraz drugie pod względem liczności miejsce.
+
+```{r}
+Data %>%
+  ggplot(aes(y = reorder(Job, Ilosc))) +
+  geom_bar(fill = "#DBA19F",
+           color = "#A13B2A") +
+  labs(title = "Liczba osób o podanym zawodzie",
+       x = "liczba osób",
+       y = "zawód") +
+  theme_bw(base_size = 10) + 
+  theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+Kończę już moje działania na zmiennej dotyczącej zawodu. Usunę jeszcze zmienną Ilosc, którą dodałam, ponieważ była mi potrzebna tylko tymczasowo.
+
+```{r}
+Data <- Data %>%
+  select(-Ilosc)
+```
+<br><br>
+
+### Zmienne jakościowe (rangowane)
+
+Teraz przyjrzę się zmiennym rangowanym, czyli Education i Senior.
+<br><br>
+
+Poziom wykształcenia:
+
+```{r}
+Data %>%
+  ggplot() +
+  geom_bar(aes(x = Education),
+           fill = "#DBA19F",
+           color = "#A13B2A") +
+  labs(title = "Liczba osób o poziomie wykształcenia",
+       x = "poziom wykształcenia",
+       y = "liczba osób") +
+  theme_bw(base_size = 15) + 
+  theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+Zdecydowanie najmniej osób w zbiorze danych ma tylko wykształcenie średnie. Najwięcej osób - około 3000 ukończyło I stopień studiów. Kategoria 2 i 3 czyli osoby z tytułem magistra i tytułem doktora stanowią razem około połowy wszystkich obserwacji i przewyższają liczbę osób z ukończonym jedynie I stopniem studiów.    
+
+Stanowisko seniorskie:
+
+```{r}
+table(Data$Senior)
+```
+Jak widać zdecydowanie większa ilość osób nie posiada stanowiska seniorskiego. Około 15% badanych jest na stanowisku seniorskim.
+
+<br><br>
+
+### Zmienne ilościowe   
+
+Teraz została mi do przejrzenia ostatnia kategoria zmiennych - zmienne ilościowe.
+<br><br>
+
+Wiek:   
+Wiem, że wiek minimalny w danym zestawie to 21, a maksymalny to 62. Na tej podstawie ustalam początek i koniec klas, co 6 lat. Dzięki temu uzyskamy 7 klas   
+Tak prezentuje się histogram dla wieku.
+
+```{r}
+Data %>%
+  ggplot() +
+  geom_histogram(mapping = aes(x = Age),
+                 breaks = seq(21, 63, 6),
+                 fill = "#DBA19F",
+                 color = "#A13B2A") +
+  labs(title = "Wiek badanych",
+       x = "wiek",
+       y = "liczba osób") +
+  theme_bw(base_size = 15) + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_x_continuous(breaks = seq(21, 63, 6))
+```
+
+Najwięcej jest osób między 27 a 33 rokiem życia. Liczne są także grupy 21-27 oraz 33-39. Później, wraz ze wzrostem wieku, liczebność klas spada. Mamy tutaj asymetrię prawostronną. Mogę policzyć współczynnik asymetrii.
+
+```{r}
+w_asymetrii_wiek <- skewness(Data$Age)
+print(w_asymetrii_wiek)
+```
+Współczynnik jest dodatni, co potwierdza skośność prawostronną.   
+Spojrzę jeszcze na statystyki opisowe.
+
+```{r}
+summary(Data$Age)
+```
+Średnia wieku badanych osób wynosi około 34. Mediana wynosi 32 -  znaczy to, że połowa badanych osób ma wiek mniejszy bądź równy 32. Trzeci kwartyl wynosi 38 - a więc 25% osób ma wiek większy bądź równy 38.    
+
+<br>
+
+Doświadczenie zawodowe:   
+Postąpię tutaj analogicznie jak przy zmiennej wiek. Najkrótsze doświadczenie to 0, najdłuższe to 34, tworzę 7 klas.
+
+```{r}
+Data %>%
+  ggplot() +
+  geom_histogram(mapping = aes(x = Experience),
+                 breaks = seq(0, 35, 5),
+                 fill = "#DBA19F",
+                 color = "#A13B2A") +
+  labs(title = "Doświadczenie zawodowe",
+       x = "lata doświadczenia",
+       y = "liczba osób") +
+  theme_bw(base_size = 15) + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+   scale_x_continuous(breaks = seq(0, 35, 5))
+```
+
+Ciekawe jest to, że zdecydowanie najwięcej osób ma bardzo małe doświadczenie zawodowe - od zera do pięciu lat. Każda kolejna klasa jest mniej liczna. Widać tutaj bardzo wyraźną asymetrię prawostronną.
+
+```{r}
+w_asymetrii_doswiadczenie <- skewness(Data$Experience)
+print(w_asymetrii_doswiadczenie)
+```
+Zobaczmy dokładniej statystyki opisowe:
+
+```{r}
+summary(Data$Experience)
+```
+
+Medianą doświadczenia zawodowego w tej grupie badanych jest 7. Oznacza to, że połowa badanych ma doświadczenie mniejsze lub równe 7 lat. Co więcej, trzeci kwartyl wynosi 12. Oznacza to, że 75% badanych ma doświadczenie mniejsze lub równe 12 lat, a więc tylko 25% osób ma doświadczenie większe lub równe 12.   
+<br><br>
+Jak zobaczyliśmy na dwóch poprzednich wykresach i licząc statystyki opisowe - w grupie badanych dużo jest młodych osób i osób o niskim doświadczeniu zawodowym. (25% badancych ma 28 lat lub mniej, 25% badanych ma 3 lata doświadczenia lub mniej). Z drugiej strony mamy mało osób starszych i mało osób z wysokim doświadczeniem. Od razu nasuwa się wniosek, że doświadczenie zawodowe i wiek są ze sobą mocno skorelowane. Czy naprawdę tak jest?  
+<br>
+**Hipoteza:** Wiek i doświadczenie zawodowe są silnie skorelowane.   
+Zbadam to, licząc współczynnik korelacji.   
+Nie zastosuję korelacji liniowej Pearsona, ponieważ ona jest odpowiednia dla danych, których rozkład jest podobny do rozkładu normalnego. Wiek i doświadczenie mają rozkład prawostronnie skośny. Zastosuję tutaj korelację rangową Spearmana.
+
+```{r}
+wiek_a_doswiadczenie <- cor(Data$Age, Data$Experience, method = "spearman")
+print(wiek_a_doswiadczenie)
+```
+Moja hipoteza się potwierdziła, współczynnik korelacji wynosi niemal 0,95 czyli widać bardzo silną zależność między wiekiem a doświadczeniem zawodowym.   
+
+
+<br><br>
+
+Wynagrodzenie:    
+Na koniec zajmę się najbardziej interesującą mnie zmienną w tym zestawie - zmienną wyrażającą wynagrodzenie. Obejrzę jej rozkład za pomocą histogramu.     
+
+```{r}
+Data %>%
+  ggplot() +
+  geom_histogram(mapping = aes(x = Salary),
+                 bins = 20,
+                 fill = "#DBA19F",
+                 color = "#A13B2A") +
+  labs(title = "Rozkład wynagrodzeń",
+       x = "wynagrodzenie",
+       y = "liczba osób") +
+  theme_bw(base_size = 15) + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_x_continuous(breaks = seq(0, 225000, 50000))
+```
+
+Kształt histogramu jest nieregularny, nie przypomina on rozkładu normalnego, nie widać też wyraźnie asymetrii prawo lub lewostronnej. Bardzo dziwi mnie słupek w okolicy wynagrodzenia równego 0$ oraz to, że słupka w kolejnym przedziale nie ma wcale. Chcę się temu bliżej przyjrzeć, by zlokalizować ewentualne wartości odstające.    
+Zastosuję regułę 1,5xIQR. To znaczy obliczę rozstęp ćwiartkowy (IQR) i sprawdzę, które wartości są oddalone od dolnego i górnego kwartyla o dalej niż 1,5 wartości IQR.   
+
+
+```{r}
+summary(Data$Salary)
+```
+
+
+```{r}
+IQR(Data$Salary)
+```
+```{r}
+granica_gorna <- 160000 + 1.5 * 90000
+granica_dolna <- 70000 - 1.5 * 90000
+
+wartosci_nieodstajace <- c(granica_dolna, granica_gorna)
+print(wartosci_nieodstajace)
+```
+Na razie wszystko wydaje się dobrze, wartości wynagrodzenia wszystkie mieszczą się pomiędzy 0 a 295000 (oczywiście dolna granica nie może być ujemna). Nurtuje mnie jednak wartość minimalna wynosząca 350. Wyświetlę kilka najmniejszych wartości wynagrodzenia.
+
+```{r}
+Data %>%
+  select(Salary) %>%
+  arrange(Salary) %>%
+  head(10, Salary)
+```
+Dziwi mnie to, że tylko cztery osoby zarabiają tak bardzo niskie kwoty poniżej. Różnica zarobków między czwartym a piątym najmniejszym wynagrodzeniem wynosi aż 24421$. Uznaję więc, że usunę te cztery najmniejsze wartości, traktując je jako wartości odstające.
+
+```{r}
+Data <- Data %>%
+  filter(Salary > 580)
+```
+
+Jeszcze raz wyświetlę histogram dla zarobków - już po usunięciu czterech outlierów.
+
+```{r}
+Data %>%
+  ggplot() +
+  geom_histogram(mapping = aes(x = Salary),
+                 bins = 20,
+                 fill = "#DBA19F",
+                 color = "#A13B2A") +
+  labs(title = "Rozkład wynagrodzeń",
+       x = "wynagrodzenie",
+       y = "liczba osób") +
+  theme_bw(base_size = 15) + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_x_continuous(breaks = seq(0, 225000, 50000))
+```
+
+<br><br>
+
+## Zależności między zmiennymi   
+
+<br>
+Teraz skupię się już na dokładniejszej analizie zbioru danych i poszukiwaniu ciekawych zależności między zmiennymi.   
+<br>
+Najpierw wyznaczę korelacje między wszystkimi zmiennymi ilościowymi. 
+
+```{r}
+cor = cor(Data[,c("Age", "Experience", "Salary")], method = "spearman")
+round(cor, 2)
+```
+Widać, że wszystkie te trzy zmienne są ze sobą mocno powiązane. Już wcześniej pokazałam, że wiek i doświadczenie zawodowe mają wysoki współczynnik korelacji. Teraz widać, że również zmienne doświadczenie-wynagrodzenie i wiek-wynagrodzenie są silnie ze sobą powiązane, chociaż współczynnik korelacji jest już nieco mniejszy, bo wynosi odpowiednio 0.86 i 0.75.   
+Mogę przedstawić to także graficznie w taki sposób:
+
+```{r}
+corrplot(cor, method = "circle", type = "upper",)
+```
+
+### Wynagrodzenie
+
+<br><br>
+Chcę zbadać, czy kraj ma duży wpływ na wysokość wynagrodzenia i w których krajach przeciętnie zarobki są najwyższe, a w których najniższe.   
+**Pytanie:** Czy kraj wpływa na wynagrodzenie?
+
+```{r}
+Data %>%
+  group_by(Country) %>%
+  summarise(Mean_Salary = mean(Salary)) %>%
+  arrange(desc(Mean_Salary))
+```
+Średnie zarobki nie różnią się bardzo między poszczególnymi krajami. Kraje Kanada, Chiny i UK mają bardzo bliską średnią zarobków, natomiast Australia i USA nieco niższą, ale wciąż nie są to duże różnice. Zarobki w Kanadzie są o niecałe 3% wyższe od zarobków w USA.
+
+
+
+```{r}
+Data %>%
+  group_by(Country) %>%
+  summarise(Mean_Salary = mean(Salary)) %>%
+  ggplot() +
+  geom_point(aes(x = reorder(Country, -Mean_Salary),
+                 y = Mean_Salary),
+             stat = "identity",
+             color = "#993366",
+             size = 5) +
+  labs(title = "Średnie wynagrodzenie w zależności od kraju",
+       x = "kraj",
+       y = "średnie wynagrodzenie") +
+  theme_bw(base_size = 13) + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_y_continuous(limits = c(113000, 117000))
+  
+```
+
+Chcę pójść jednak dalej w tym temacie i spróbować dowiedzieć się, czy te różnice w zarobkach między krajami mają jakieś uzasadnienie, czy też są zupełnie przypadkowe?   
+Sprawdzę, jakie przeciętne doświadczenie zawodowe mają ludzie w każdym z krajów. Wiemy już z wcześniejszych badań, że to właśnie doświadczenie zawodowe ma bardzo duży wpływ na pensję.    
+**Pytanie:** Czy przeciętne doświadczenie zawodowe różni się pomiędzy krajami?
+
+```{r}
+Data %>%
+  group_by(Country) %>%
+  summarise(Mean_Experience = round(mean(Experience), 2)) %>%
+  arrange(desc(Mean_Experience))
+```
+Widzimy, że przeciętne doświadczenie jest na podobnym poziomie w każdym z krajów. Różnica między najwyższym, a najniższym przeciętnym doświadczeniem wynosi tylko niecałe pół roku. Jednak widać też, że to właśnie w USA i Australii (czyli krajach z najniższym przeciętnym wynagrodzeniem) najniższe jest także przeciętne doświadczenie zawodowe.
+<br><br>
+Idąc dalej tropem poszukiwania tego, co kształtuje zarobki, chcę sprawdzić, czy płeć wpływa na wysokość wynagrodzenia. Najpierw policzę przeciętne wynagrodzenie w zależności od płci globalnie (czyli dla wszystkich krajów), a następnie zobaczę, jak sprawa ma się w każdym z krajów osobno.   
+**Pytanie:** Czy płeć wpływa na przeciętne wynagrodzenie?
+
+```{r}
+Data %>%
+  group_by(Gender) %>%
+  summarise(Mean_Salary = mean(Salary)) %>%
+  arrange(desc(Mean_Salary))
+```
+
+Wyniki wskazują na to, że przeciętne wynagrodzenie kobiet jest aż o ponad 13700$ niższe niż przeciętne wynagrodzenie mężczyzn. Wynagrodzenie mężczyzn jest więc o ok. 12.5% wyższe niż wynagrodzenie kobiet.    
+**Pytanie:** Czy wynika to z tego, że mężczyźni mają wyższe doświadczenie zawodowe?   
+
+```{r}
+Data %>%
+  group_by(Gender) %>%
+  summarise(Mean_Experience = round(mean(Experience), 2)) %>%
+  arrange(desc(Mean_Experience))
+```
+Mężczyźni faktycznie mają średnio wyższe doświadczenie zawodowe niż kobiety, jednak różnica wynosi tylko około 1 roku. Nie jest to duża różnica. Sprawdzę jeszcze, jak wygląda wykształcenie u kobiet, a jak u mężczyzn.  
+
+```{r}
+Data %>%
+  ggplot() +
+  geom_bar(aes(x = Education,
+               fill = Gender),
+           position = "dodge2") +
+  labs(title = "Liczba osób o danym stopniu wykształcenia",
+       x = "poziom wykształcenia",
+       y = "liczba osób",
+       fill = "Płeć") +
+  theme_bw(base_size = 13) + 
+  theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+Na wykresie widać, ile osób ma dany poziom wykształcenia, kolory oznaczają płeć.  
+Zdecydowanie więcej mężczyzn niż niż kobiet ma ukończone studia I stopnia (o ponad 500 więcej mężczyzn niż kobiet). Jednakże to więcej kobiet niż mężczyzn posiada tytuł magistra (o ponad 250 więcej kobiet niż mężczyzn). Jeśli chodzi tytuł doktora, to mężczyzn jest więcej. Wykształcenie średnie ma podobna ilość mężczyzn, co kobiet.  
+
+```{r}
+Data %>%
+  select(Gender, Education) %>%
+  filter(Education == 2 | Education == 3) %>%
+  group_by(Gender) %>%
+  summarise(Liczba = n()) %>%
+  arrange(desc(Liczba))
+  
+```
+
+Chciałam sprawdzić tylko osoby, które posiadają tytuł magistra lub doktora - czyli skończyły studia II stopnia lub studia doktoranckie. Tutaj różnica między kobietami i mężczyznami jest już niewielka i wynosi niecałe 100 osób.   
+<br>
+Moje wnioski z tej części analizy są następujące: Mężczyźni zarabiają przeciętnie więcej niż kobiety i zgodnie z przewidywaniami mają oni o około 1 rok wyższe przeciętne doświadczenie zawodowe. Mężczyźni mają również przeciętnie wyższe wykształcenie niż kobiety - jednak tutaj ponownie różnica nie jest wielka. Więcej mężczyzn kończy studia I stopnia i studia doktoranckie, natomiast więcej kobiet niż mężczyzn posiada tytuł magistra. Jeśli chodzi o dwa najwyższe stopnie wykształcenia (2 i 3) to tutaj różnica wynosi tylko 100 osób  - jest o 6% więcej mężczyzn niż kobiet, którzy posiadają tytuł magistra lub doktora.   
+Nie wiemy jeszcze jednak, czy stopień wykształcenia naukowego ma wpływ na wynagrodzenie.
+<br>
+**Pytanie:** Czy poziom wykształcenia wpływa na zarobki?
+
+```{r}
+Data %>%
+  group_by(Education) %>%
+  summarise(Mean_Salary = mean(Salary)) %>%
+  arrange(desc(Mean_Salary))
+```
+
+Oczywiście poziom wykształcenia determinuje wysokość wynagrodzenia. Osoby, które mają skończony I stopień studiów zarabiają o 176% więcej od osób z jedynie wykształceniem średnim. Osoby po studiach II stopnia zarabiają 36% więcej od osób po studiach I stopnia. Natomiast osoby z tytułem doktora zarabiają o 27% więcej od osób z tytułem magistra.
+
+```{r}
+Data %>%
+  group_by(Education) %>%
+  summarise(Mean_Salary = mean(Salary)) %>%
+  ggplot() +
+  geom_point(aes(x = Education,
+                 y = Mean_Salary),
+             stat = "identity",
+             color = "#993366",
+             size = 5) +
+  labs(title = "Średnie wynagrodzenie w zależności od poziomu wykształcenia",
+       x = "Poziom wykształcenia",
+       y = "Średnie wynagrodzenie",) +
+  theme_bw(base_size = 13) + 
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Wrócę teraz do sprawy tego, jak wygląda zróżnicowanie zarobków w poszczególnych krajach, w zależności od płci. Na razie pokazywałam osobno jak wpływa kraj na zarobki oraz płeć na zarobki. Wiadomo, że mężczyźni zarabiają przeciętnie więcej. Jak to wygląda w każdym z krajów?
+
+```{r, message = FALSE}
+Data %>%
+  group_by(Country, Gender) %>%
+  summarise(Mean_Salary = mean(Salary)) %>%
+  ggplot() +
+  geom_point(aes(x = reorder(Country, -Mean_Salary),
+                 y = Mean_Salary,
+                 color = Gender),
+             size = 4) +
+  labs(title = "Przeciętne zarobki w zależności od kraju i płci",
+       x = "Kraj",
+       y = "Średnie wynagrodzenie",
+       color = "Płeć") +
+  theme_bw(base_size = 13) + 
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Widać bardzo dokładnie, że w każdym z krajów to właśnie mężczyźni zarabiają więcej. Co ciekawe, w kraju gdzie mężczyźni zarabiają najwięcej w porównaniu z innymi krajami (Kanada), kobiety zarabiają najmniej w porównaniu z innymi krajami. W USA, gdzie mężczyźni zarabiają najmniej, kobiety również zarabiają najmniej (w porównaniu z zarobkami swojej płci w innych krajach). W Chinach zarobki mężczyzn i kobiet różnią się przeciętnie o najmniejszą kwotę.   
+<br><br>
+
+Sprawdziłam już, jak na zarobki wpływają pojedyńcze cechy takie jak kraj, płeć, poziom wykształcenia. Płeć i poziom wykształcenia miały istotny wpływ, natomiast kraj nie. Jak jednak sprawa wygląda z poszczególnymi rasami?    
+**Pytanie:** Czy rasa wpływa na zarobki?
+
+```{r}
+Data %>%
+  select(Race, Salary) %>%
+  group_by(Race) %>%
+  summarise(Mean_Salary = mean(Salary)) %>%
+  arrange(desc(Mean_Salary))
+  
+```
+
+Różnice znów nie są duże, osoby o rasie mieszanej, zarabiający najwięcej, mają zarobki wyższe tylko o niecałe 2% od osób rasy azjatyckiej, którzy zarabiają najmniej.
+
+Chcę porównać, jak wygląda to w konkretnych krajach. Najpierw jednak chcę sobaczyć, jaki udział ma każda z ras w poszczególnym kraju.
+
+```{r}
+Data %>%
+  ggplot() +
+  geom_bar(aes(x = Country,
+               fill = Race),
+           position = "dodge2") +
+  labs(title = "Liczba osób o danej rasie w krajach",
+       x = "kraj",
+       y = "liczba osób",
+       fill = "Rasa") +
+  theme_bw(base_size = 13) + 
+  theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+W żadnym z krajów nie ma wszystkich czterech ras. Co ciekawe, tyko w UK mamy rasę Mixed, która to według wcześniej wyznaczonych statystyk zarabia najwięcej. Najbardziej zróżnicowana rasowo wydaje się Kanada, udział każdej z trzech występujących tam ras stanowi około 1/3. Ciekawie przedstawiają się Australia i Chiny, które posiadają tylko dwie rasy, natomiast o odwrotnej proporcji udziału w populacji.   
+
+<br>
+Chcę zobaczyć na wykresie, jak różni się sytuacja w Australii i Chinach.
+
+```{r}
+Data %>%
+      filter(Country == "Australia" | Country == "China") %>%
+      ggplot() + 
+      geom_jitter(mapping = aes(x = Experience,
+                               y = Salary,
+                               color = Country),
+                  size = 3,
+                  alpha = 0.2,
+                  width = 0.15) +
+  facet_wrap(vars(Race,
+                  Country),
+             nrow = 2) +
+  theme_bw() +
+  labs(title = "Zarobki poszczególnych ras w Chinach i Kanadzie",
+       x = "doświadczenie",
+       y = "średnie wynagrodzenie") +
+  theme_bw(base_size = 13) + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+   theme(legend.position = "none") 
+```
+
+Mimo, że w Chinach to osoby o rasie azjatyckiej stanowi większość, a w Australii to rasa biała stanowi większość, na wykresach nie widać szczególnych różnic między sytuacją zarobkową osób w Australii i Chinach ze względu na rasę. Potwierdzę to licząc średnie.
+
+```{r, message = FALSE}
+Data %>%
+  filter(Country %in% c("Australia", "China")) %>%
+  select(Salary, Country, Race) %>%
+  group_by(Country, Race) %>%
+  summarise(Mean_Salary = mean(Salary))
+  
+```
+
+Wygląda na to, że średnia zarobków osób rasy białej jest w Chinach nieco wyższa niż średnia zarobków osób rasy azjatyckiej. Natomiast w Australii obie rasy zarabiają niemal tyle samo. 
+Zobaczmy to na wspólnym wykresie rasy białej i azjatyckiej w Chinach.
+
+```{r, message = FALSE}
+Data %>%
+      filter(Country == "China") %>%
+      ggplot() + 
+      geom_jitter(mapping = aes(x = Experience,
+                               y = Salary,
+                               color = Race),
+                  size = 3,
+                  alpha = 0.15,
+                  width = 0.15) +
+  scale_color_manual(values = c("red", "black")) +
+  theme_bw() +
+  labs(title = "Zarobki poszczególnych ras w Chinach",
+       x = "doświadczenie",
+       y = "średnie wynagrodzenie") +
+  theme_bw(base_size = 13) + 
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Z wykresu nie można jednoznacznie powiedzieć, że istnieją jakieś nierówności wynangordzenia wynikające z rasy.
+<br><br>
+
+### Zawód 
+Chcę teraz przyjrzeć się zmiennej dotyczącej zawodów. Jak wiemy z pierwotnego przeglądania danych, kategorii zawodu jest aż 33. Weźmy kilka zawodów, które są wykonywane przez największą liczbę osób.
+
+```{r}
+Data %>%
+  select(Job, Salary) %>%
+  group_by(Job) %>%
+  summarise(Liczba = n()) %>%
+  top_n(6, Liczba) %>%
+  arrange(desc(Liczba))
+```
+
+Ominę kategorię zbiorczą Other i wezmę trzy zawody wykonywane przez największą liczbę osób, czyli: Software Engineer, Data Scientist, Data Analyst.   
+**Pytanie:** Jak różni się wiek osób wykonujących te trzy zawody?
+
+```{r}
+Data %>%
+  filter(Job %in% c("Software Engineer", "Data Scientist", "Data Analyst")) %>%
+  ggplot() +
+  geom_density(aes(x = Age,
+                   fill = Job),
+               alpha = 0.6) +   
+  theme_bw() +
+  labs(title = "Wiek badanych a zawód",
+       x = "wiek",
+       y = "gęstość",
+       fill = "Zawód") +
+  theme_bw(base_size = 13) + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_x_continuous(breaks = seq(20, 60, by = 5))
+```
+
+Widać zróżnicowanie wieku u osób pracujących w danych zawodach. Młodzi ludzie głównie wybierają zawód Data Analyst lub Software Engineer. Najwięcej osób pracujących jako Data Analyst ma 25 lat, a najwięcej osób pracujących jako Softwaree Engineer ma około 28 lat. Bardzo mało jest osób powyżej 40 roku życia pracujących jako Data Analyst, wraz z wiekiem (już powyżej 33 lat) wyraźnie spada też liczba osób pracujących jako Software Engineer - w obu przypadkach obserwujemy asymetrię prawostronną. Co ciekawe, rozkład osób pracujących jako Data Scientist jest dwumodalny. Wyraźnie widać, że najwięcej osób pracujących na tym stanowisku skupia się wokół wieku około 32 i 44. Bardzo mała część osób młodych (poniżej 25 lat) pracuje jako Data Scientist. Może to wynikać z tego, że aby zostać Data Scientist, potrzebny jest wyższy poziom wykształcenia lub dłuższe doświadczenie zawodowe.
+<br>
+
+**Pytanie:** Jak różni się stopień naukowy osób wykonujących dany zawód?
+
+```{r}
+Data %>%
+  filter(Job %in% c("Software Engineer", "Data Scientist", "Data Analyst")) %>%
+  ggplot() +
+  geom_bar(aes(x = Job,
+               fill = Education),
+           position = "fill") +
+  labs(title = "Udział osób o różnym poziomie wykształcenia w zawodzie",
+       x = "zawód",
+       y = "udział",
+       fill = "Stopień wykształcenia") +
+  theme_bw(base_size = 13) +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Moje przypuszczenia się potwierdziły. Jak widać zdecydowana większość (około 70%) osób na stanowisku Data Scientist ma tytuł doktora. Jak widać, posiadanie co najmniej ukończonych studiów II stopnia jest kluczowe, aby zostać Data Scientist, jedynie odsetek osób wykonujących ten zawód ma niższe wykształcenie. Natomiastst struktura wykształcenia osób na stanowisku Data Analyst i Software Engineer jest podobna do siebie. Zdecydowana większość ma ukończone tylko studia I stopnia, około 20-25% osób ma ukończone studia II stopnia.   
+<br>
+**Pytanie:** Jak różni się doświadczenie zawodowe osób wykonujących dany zawód?
+
+```{r}
+Data %>%
+  filter(Job %in% c("Software Engineer", "Data Scientist", "Data Analyst")) %>%
+  group_by(Job) %>%
+  summarise(Mean_Experience = round(mean(Experience), 2)) %>%
+  arrange(desc(Mean_Experience))
+```
+
+
+Widać, że zdecydowanie najdłuższe doświadczenie zawodowe mają Data Scientist. Różni się ono aż o ponad 6 lat od osób pracujących jako Data Analyst.   
+Zobaczę jeszcze, jak przedstawia się to na wykresie w połączeniu z wynagrodzeniem.
+
+```{r}
+Data %>%
+  filter(Job %in% c("Software Engineer", "Data Scientist", "Data Analyst")) %>%
+  ggplot() +
+  geom_jitter(aes(x = Experience,
+                  y = Salary,
+                  color = Job),
+             size = 3,
+             alpha = 0.2, 
+             width = 0.15) +
+  labs(title = "Doświadczenie a wynagrodzenie",
+       x = "Doświadczenie",
+       y = "Wynagrodzenie",
+       color = "Zawód") +
+  facet_wrap(vars(Job), nrow = 1) +
+  theme_bw(base_size = 13) +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Na wykresach widać wiele bardzo ciekawych zjawisk. Widać, że nie ma Data Scientist, którzy posiadają doświadczenie dłuższe od 25 lat, a istnieją za to tacy Software Engineer. Widać, że jest wielu Software Engineer z tak naprawdę z każdym poziomem doświadczenia - zarówno niskim, przeciętnym jak i bardzo wysokim (nawet około 30 lat). Ich zarobki natomiast nie przekraczają 200000 USD, nawet mimo tak długiego doświadczenia. Natomniast u Data Scientist tak zwany "próg wejścia" jest wyższy - potrzebne jest dłuższe doświadczenie, obserwujemy bardzo mało osób o niskim doświadczeniu zawodowym, najwięcej jest osób między 10 a 20-letnim doświadczeniem. Natomiast mimo tego, zarobki są na bardzo podonym poziomie, jak u bardziej doświadczonych Software Engineer, a po przekroczeniu 20 lat doświadczenia, szybko szybują w górę powyżej 200000 USD. Data Analyst natomiast mają krótkie i średnie doświadczenie - większość z nich poniżej 10 lat, zarabiają również mniej niż pozostałe dwa zawody.   
+<br>
+Jestem też ciekawa, czy w zawodzie Data Scientist jest większy udział osób na stanowisku Senior niż w pozostałych dwóch zawodach. Znów posłużę się wykresem, żeby zbadać tę kwestię.<br>
+**Pytanie:**Jak wygląda udział stanowisk Senior w tych zawodach?
+
+```{r}
+Data %>%
+  filter(Job %in% c("Software Engineer", "Data Scientist", "Data Analyst")) %>%
+  ggplot() +
+  geom_bar(aes(x = Job,
+               fill = Senior),
+           position = "fill") +
+  labs(title = "Udział osób na stanowisku seniora",
+       x = "zawód",
+       y = "udział") +
+  theme_bw(base_size = 13) +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Jednak moje przypuszczenia się nie sprawdziły i to nie w zawodzie Data Scientist jest największy udział osób na stanowisku senior. Zdecydowanie najwięcej (około 30%) jest ich w zawodzie Software Engineer. Zgadzało by się to z tym, co obserowaliśmy na wcześniejszym wykresie punktowym, że jest wielu Software Engineer o wysokim lub bardzo wysokim doświadczeniu zawodowym. U Data Scientist jest ich około 10%, natomiast na stanowisku Data Analsyst nie ma prawie wcale. Od razu nasuwa się też pytanie, jak wiek wpływa na stanowisko seniora. Spodziewam się, że jest ważnym czynnikiem.   
+**Hipoteza:** Wiek ma duży wpływ na obejmowanie stanowiska seniora.  
+
+```{r}
+Data %>%
+  filter(Job %in% c("Software Engineer", "Data Scientist", "Data Analyst")) %>%
+  ggplot() +
+  geom_jitter(aes(x = Age,
+                  y = Salary,
+                  color = Senior),
+             size = 3,
+             alpha = 0.2, 
+             width = 0.15) +
+  labs(title = "Wiek a stanowisko senior",
+       x = "wiek",
+       y = "wynagrodzenie",
+       color = "Senior") +
+  facet_wrap(vars(Job), nrow = 1) +
+  theme_bw(base_size = 13) +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Zgodnie z moimi przypuszczeniami wiek wpływa na to, czy osoba obejmuje stanowisko seniora. U Data Analyst widzimy tylko 3 seniorów, wszyscy z nich są najstarsi. U Data Scientist wiek seniorów jest już bardziej zróżnicowany, ale nie ma seniorów młodszych niż około 35 lat, jednak co ciekawe - osoby najstarsze (około 50 lat) wcale nie są na stanowisku senior. U Softwaree Engineer seniorów jest dużo i są oni w każdym wieku od mniej więcej 30 roku życia, aż do najstarszych 60 - latków. Widać też ciekawą zależnośc, że na stanowisku Softwaree Engineer osiągając pewien wiek (około 43 lat) każdy z pracujących jest już seniorem.   <br>
+
+Jestem jeszcze ciekawa, jaką część osób pracujących w danym zawodzie stanowią kobiety, a jaką mężczyźni.   
+**Pytanie:** Pracowników której płci jest więcej w dancyh zawodach>
+
+```{r}
+Data %>%
+  filter(Job %in% c("Software Engineer", "Data Scientist", "Data Analyst")) %>%
+  ggplot() +
+  geom_bar(aes(x = Job,
+               fill = Gender),
+           position = "fill") +
+  labs(title = "Zróżnicowanie płci w zawodzie",
+       x = "zawód",
+       y = "udział",
+       fill = "Płeć") +
+  theme_bw(base_size = 13) +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Widać, że w każdym zawodzie większość stanowią mężczyźni. Największy odsetek mężczyzn jest na stanowisku Data Analyst - udział kobiet w tym zawodzie stanowi tam trochę ponad 25%.
+
+
